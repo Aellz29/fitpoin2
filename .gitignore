@@ -1,6 +1,8 @@
 # See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
 
-# dependencies
+# ==============================================================================
+# DEPENDENCIES (Folder instalasi library)
+# ==============================================================================
 /node_modules
 /.pnp
 .pnp.*
@@ -10,32 +12,63 @@
 !.yarn/releases
 !.yarn/versions
 
-# testing
+# ==============================================================================
+# TESTING (Hasil laporan testing kode)
+# ==============================================================================
 /coverage
 
-# next.js
+# ==============================================================================
+# NEXT.JS PRODUCTION & BUILD (Folder hasil compile aplikasi)
+# ==============================================================================
 /.next/
 /out/
-
-# production
 /build
 
-# misc
+# ==============================================================================
+# ENVIRONMENT VARIABLES (CRITICAL: PENGAMANAN DATABASE & KEY)
+# ==============================================================================
+# Memblokir semua jenis file env bawaan
+.env
+.env.local
+.env.production
+.env.development
+
+# Proteksi ekstra untuk file env lokal/rahasia (Wajib untuk FitPoin)
+.env*.local
+.env.development.local
+.env.runtime.local
+.env.production.local
+
+# ==============================================================================
+# SYSTEM & MISC (File sampah bawaan OS / Text Editor)
+# ==============================================================================
 .DS_Store
 *.pem
+Thumbs.db
+.idea/
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
 
-# debug
+# ==============================================================================
+# LOG FILES (File laporan error local server)
+# ==============================================================================
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files (can opt-in for committing if needed)
-.env*
-
-# vercel
+# ==============================================================================
+# DEPLOYMENT PLATFORMS (Folder konfigurasi hosting)
+# ==============================================================================
 .vercel
+.netlify
 
-# typescript
+# ==============================================================================
+# TYPESCRIPT
+# ==============================================================================
 *.tsbuildinfo
 next-env.d.ts
