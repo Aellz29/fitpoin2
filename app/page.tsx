@@ -44,6 +44,12 @@ export default function Page() {
   const [distance, setDistance] = useState('');
   const [duration, setDuration] = useState('');
 
+  // Mobile FAB & Modal State
+  const [showAddModal, setShowAddModal] = useState(false);
+
+  // Gamification Reward State
+  const [rewardAnim, setRewardAnim] = useState<{ show: boolean; xp: number; type: string }>({ show: false, xp: 0, type: '' });
+
   // Auth Form State
   const [authEmail, setAuthEmail] = useState('');
   const [authPassword, setAuthPassword] = useState('');
@@ -53,6 +59,16 @@ export default function Page() {
   // Global Community Data State (Synced from MongoDB)
   const [allActivities, setAllActivities] = useState<ActivityLog[]>([]);
   const [allUsers, setAllUsers] = useState<UserProfile[]>([]);
+
+  // ================= GAMIFICATION LOGIC (BADGES) =================
+  const getBadge = (xp: number) => {
+    if (xp >= 5000) return { icon: '💎', label: 'Elite', color: 'text-blue-500 bg-blue-50 border-blue-200' };
+    if (xp >= 2000) return { icon: '🥇', label: 'Athlete', color: 'text-yellow-600 bg-yellow-50 border-yellow-200' };
+    if (xp >= 500) return { icon: '🥈', label: 'Active', color: 'text-gray-600 bg-gray-100 border-gray-300' };
+    return { icon: '🥉', label: 'Starter', color: 'text-amber-700 bg-amber-50 border-amber-200' };
+  };
+
+  const getUserTotalXP = (userId: string) => allActivities.filter(a => a.userId === userId).reduce((sum, curr) => sum + curr.xp, 0);
 
   // ================= REFRESH DATA DARI MONGODB =================
   const refreshDataFromDatabase = async () => {
@@ -67,15 +83,12 @@ export default function Page() {
   };
 
   useEffect(() => {
-    // Sesi login lokal tetap disimpan agar tidak ter-logout saat refresh page
     const savedSession = localStorage.getItem('fitpoin_current_user');
     if (savedSession) setCurrentUser(JSON.parse(savedSession));
-
-    // Ambil data terbaru dari cloud MongoDB
     refreshDataFromDatabase();
   }, []);
 
-  // ================= AUTH LOGIC (SINKRONISASI MONGODB) =================
+  // ================= AUTH LOGIC =================
   const handleAuthSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (authMode === 'register') {
@@ -100,39 +113,22 @@ export default function Page() {
       .catch(err => alert(err.message));
     } else {
       const foundUser = allUsers.find(u => u.email === authEmail);
-      if (!foundUser) return alert('Email tidak ditemukan atau database belum sinkron!');
+      if (!foundUser) return alert('Email tidak ditemukan!');
       setCurrentUser(foundUser);
       localStorage.setItem('fitpoin_current_user', JSON.stringify(foundUser));
       setActiveTab('dashboard');
     }
   };
 
-  // DIRECT DEMO LOGIN
   const handleDemoLogin = () => {
     const demoUser: UserProfile = {
-      id: 'usr_demo_atlet',
-      fullName: 'Bagas Atlet Demo',
-      email: 'demo@fitpoin.com',
-      height: '175',
-      weight: '70',
-      birthDate: '1999-08-17'
+      id: 'usr_demo_atlet', fullName: 'Bagas Atlet Demo', email: 'demo@fitpoin.com', height: '175', weight: '70', birthDate: '1999-08-17'
     };
-
-    fetch('/api/data', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'register', user: demoUser })
-    }).then(() => {
-      setCurrentUser(demoUser);
-      localStorage.setItem('fitpoin_current_user', JSON.stringify(demoUser));
-      setActiveTab('dashboard');
-      refreshDataFromDatabase();
-      alert('Berhasil masuk menggunakan Akun Demo!');
+    fetch('/api/data', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'register', user: demoUser }) })
+    .then(() => {
+      setCurrentUser(demoUser); localStorage.setItem('fitpoin_current_user', JSON.stringify(demoUser)); setActiveTab('dashboard'); refreshDataFromDatabase(); alert('Berhasil masuk menggunakan Akun Demo!');
     }).catch(() => {
-      setCurrentUser(demoUser);
-      localStorage.setItem('fitpoin_current_user', JSON.stringify(demoUser));
-      setActiveTab('dashboard');
-      refreshDataFromDatabase();
+      setCurrentUser(demoUser); localStorage.setItem('fitpoin_current_user', JSON.stringify(demoUser)); setActiveTab('dashboard'); refreshDataFromDatabase();
     });
   };
 
@@ -142,11 +138,10 @@ export default function Page() {
     setActiveTab('dashboard');
   };
 
-  // ================= UPDATE PROFIL KEMBALI KE MONGODB =================
+  // ================= UPDATE PROFIL =================
   const handleUpdateProfile = (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentUser) return;
-
     fetch('/api/data', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -161,7 +156,6 @@ export default function Page() {
     .catch(err => alert(err.message));
   };
 
-  // ESTIMASI XP LOGIC
   const calculateXP = () => {
     if (['Push Up', 'Sit Up', 'Pull Up', 'Squat'].includes(exerciseType)) return (parseInt(reps) || 0) * (parseInt(sets) || 0) * 0.5; 
     if (exerciseType === 'Plank') return (parseInt(duration) || 0) * 10;
@@ -170,7 +164,7 @@ export default function Page() {
   };
   const currentXP = calculateXP();
 
-  // ================= SIMPAN AKTIVITAS BARU (SISTEM CICIL) KE MONGODB =================
+  // ================= SIMPAN AKTIVITAS (SISTEM CICIL) =================
   const handleSaveActivity = (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentUser) {
@@ -179,15 +173,13 @@ export default function Page() {
     }
     if (!sessionName.trim()) return alert('Nama sesi latihan harus diisi!');
 
-    // Membuat string detail berdasarkan jenis latihan
     let detailString = '';
     if (['Push Up', 'Sit Up', 'Pull Up', 'Squat'].includes(exerciseType)) detailString = `${reps || 0} reps × ${sets || 0} set`;
     else if (exerciseType === 'Plank') detailString = `${duration || 0} menit`;
     else if (exerciseType === 'Perfect Run') detailString = `${distance || 0} KM • ${duration || 0} menit`;
 
-    // SELALU MEMBUAT ENTRY BARU AGAR BISA DICICIL (Menghindari replaceOne _id error)
     const targetActivity: ActivityLog = {
-      id: 'act_' + Date.now().toString() + Math.random().toString(36).substring(2, 7), // ID Unik
+      id: 'act_' + Date.now().toString() + Math.random().toString(36).substring(2, 7), // ID Unik agar bisa dicicil
       userId: currentUser.id,
       userName: currentUser.fullName,
       sessionName: sessionName,
@@ -210,19 +202,20 @@ export default function Page() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Gagal menyimpan aktivitas latihan');
       
-      // Reset Form setelah sukses
+      // TRIGGER REWARD ANIMATION
+      setRewardAnim({ show: true, xp: currentXP, type: exerciseType });
+      setTimeout(() => setRewardAnim({ show: false, xp: 0, type: '' }), 3500);
+
+      // Reset Form & Tutup Modal
       setSessionName(''); setReps(''); setSets(''); setDistance(''); setDuration('');
-      
+      setShowAddModal(false);
       refreshDataFromDatabase();
-      alert('Aktivitas berhasil dicatat! Lanjutkan cicilan latihanmu.');
     })
     .catch(err => alert(err.message));
   };
 
-  // HAPUS AKTIVITAS DARI MONGODB
   const handleDeleteActivity = (id: string) => {
-    if (!confirm('Apakah Anda yakin ingin menghapus log aktivitas latihan ini dari database cloud?')) return;
-    
+    if (!confirm('Apakah Anda yakin ingin menghapus log ini?')) return;
     fetch('/api/data', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -231,12 +224,11 @@ export default function Page() {
     .then(res => {
       if (!res.ok) throw new Error('Gagal menghapus log dari database');
       refreshDataFromDatabase();
-      alert('Aktivitas berhasil dihapus dari MongoDB!');
+      alert('Aktivitas berhasil dihapus!');
     })
     .catch(err => alert(err.message));
   };
 
-  // PROGRESS TARGET (Otomatis Menjumlahkan Seluruh Cicilan)
   const getProgress = (type: string) => {
     if (!currentUser) return 0;
     const acts = allActivities.filter(a => a.userId === currentUser.id && a.type === type);
@@ -258,13 +250,55 @@ export default function Page() {
   const doneTargets = targets.filter(t => getProgress(t.key) >= t.max).length;
   const totalPercent = Math.min(Math.floor((doneTargets / targets.length) * 100), 100);
 
-  // KLASEMEN LIGA GLOBAL (MONGODB LIVE SYNC)
-  const leaderboard = allUsers.map(u => ({
-    id: u.id, name: u.fullName, xp: allActivities.filter(a => a.userId === u.id).reduce((acc, curr) => acc + curr.xp, 0)
-  })).sort((a, b) => b.xp - a.xp).filter(u => u.xp > 0);
-
+  const leaderboard = allUsers.map(u => ({ id: u.id, name: u.fullName, xp: getUserTotalXP(u.id) })).sort((a, b) => b.xp - a.xp).filter(u => u.xp > 0);
   const myActivities = currentUser ? allActivities.filter(a => a.userId === currentUser.id) : [];
   const myTotalXp = myActivities.reduce((acc, curr) => acc + curr.xp, 0);
+
+  // ================= FUNGSI RENDER FORM (Untuk Desktop & Modal Mobile) =================
+  const renderActivityForm = () => (
+    <form onSubmit={handleSaveActivity} className="space-y-4">
+      <div>
+        <label className="block text-sm font-medium text-gray-700 mb-1">Nama Sesi Latihan</label>
+        <input type="text" value={sessionName} onChange={(e) => setSessionName(e.target.value)} placeholder="Contoh: Morning Run" className="w-full bg-gray-50 border border-gray-200 rounded-md px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#FF5722]/20"/>
+      </div>
+      <div>
+        <label className="block text-sm font-medium text-gray-700 mb-1">Jenis Latihan</label>
+        <div className="relative">
+          <select value={exerciseType} onChange={(e) => { setExerciseType(e.target.value); setReps(''); setSets(''); setDistance(''); setDuration(''); }} className="w-full bg-gray-50 border border-gray-200 rounded-md px-4 py-2.5 text-sm appearance-none focus:outline-none focus:ring-2 focus:ring-[#FF5722]/20 text-gray-800">
+            <option value="Push Up">Push Up 💪</option>
+            <option value="Sit Up">Sit Up 🧘</option>
+            <option value="Pull Up">Pull Up 🏋️</option>
+            <option value="Squat">Squat 🦵</option>
+            <option value="Plank">Plank ⚡</option>
+            <option value="Perfect Run">Perfect Run 🏃</option>
+          </select>
+          <div className="absolute right-3 top-3 pointer-events-none text-gray-400"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m6 9 6 6 6-6"/></svg></div>
+        </div>
+      </div>
+      {exerciseType === 'Perfect Run' && (
+        <div className="grid grid-cols-2 gap-4">
+          <div><label className="block text-sm font-medium text-gray-700 mb-1">Jarak (KM)</label><input type="number" step="0.1" value={distance} onChange={(e) => setDistance(e.target.value)} placeholder="0.0" className="w-full bg-gray-50 border border-gray-200 rounded-md px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#FF5722]/20"/></div>
+          <div><label className="block text-sm font-medium text-gray-700 mb-1">Durasi (menit)</label><input type="number" value={duration} onChange={(e) => setDuration(e.target.value)} placeholder="0" className="w-full bg-gray-50 border border-gray-200 rounded-md px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#FF5722]/20"/></div>
+        </div>
+      )}
+      {exerciseType === 'Plank' && (
+        <div><label className="block text-sm font-medium text-gray-700 mb-1">Durasi (menit)</label><input type="number" value={duration} onChange={(e) => setDuration(e.target.value)} placeholder="0" className="w-full bg-gray-50 border border-gray-200 rounded-md px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#FF5722]/20"/></div>
+      )}
+      {['Push Up', 'Sit Up', 'Pull Up', 'Squat'].includes(exerciseType) && (
+        <div className="grid grid-cols-2 gap-4">
+          <div><label className="block text-sm font-medium text-gray-700 mb-1">Reps</label><input type="number" value={reps} onChange={(e) => setReps(e.target.value)} placeholder="0" className="w-full bg-gray-50 border border-gray-200 rounded-md px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#FF5722]/20"/></div>
+          <div><label className="block text-sm font-medium text-gray-700 mb-1">Set</label><input type="number" value={sets} onChange={(e) => setSets(e.target.value)} placeholder="0" className="w-full bg-gray-50 border border-gray-200 rounded-md px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#FF5722]/20"/></div>
+        </div>
+      )}
+      <div className="bg-gray-100 rounded-md p-4 mt-2 flex justify-between items-center">
+        <p className="text-sm text-gray-500">Estimasi FitPoin didapat:</p>
+        <p className="text-xl font-bold text-[#FF5722]">+{currentXP} XP</p>
+      </div>
+      <button type="submit" className="w-full bg-[#FF5722] hover:bg-[#E64A19] text-white font-semibold py-3 rounded-md transition mt-4 shadow-sm">
+        Simpan & Tarung Klasemen
+      </button>
+    </form>
+  );
 
   // ================= UI RENDER =================
   if (activeTab === 'auth') {
@@ -332,9 +366,25 @@ export default function Page() {
   }
 
   return (
-    <div className="min-h-screen bg-[#F8FAFC] font-sans text-slate-800 pb-10">
+    <div className="min-h-screen bg-[#F8FAFC] font-sans text-slate-800 pb-20 md:pb-10 relative">
+      
+      {/* ================= REWARD ANIMATION OVERLAY ================= */}
+      {rewardAnim.show && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center pointer-events-none">
+          <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm animate-pulse"></div>
+          <div className="bg-white p-8 rounded-3xl shadow-2xl z-10 text-center transform animate-bounce-short border-4 border-[#FF5722]">
+            <div className="text-6xl mb-4">🔥</div>
+            <h2 className="text-2xl font-black text-gray-900 mb-1">MANTAP!</h2>
+            <p className="text-gray-500 font-medium mb-4">Berhasil mencatat log {rewardAnim.type}</p>
+            <div className="bg-orange-100 text-[#FF5722] font-black text-3xl py-3 px-6 rounded-xl inline-block shadow-inner">
+              +{rewardAnim.xp} XP
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* NAVBAR */}
-      <nav className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between sticky top-0 z-10">
+      <nav className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between sticky top-0 z-10 shadow-sm">
         <div className="flex items-center gap-2 cursor-pointer" onClick={() => setActiveTab('dashboard')}>
           <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#FF5722" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2" /></svg>
           <span className="text-xl font-bold tracking-tight text-gray-900">FIT<span className="text-gray-600">POIN</span></span>
@@ -353,23 +403,29 @@ export default function Page() {
         </div>
 
         <div className="flex items-center gap-4">
-          {currentUser && <button onClick={handleLogout} className="text-sm font-semibold text-gray-500 hover:text-red-500 transition">Logout</button>}
-          <button onClick={() => setActiveTab('auth')} className="bg-[#FF5722] hover:bg-[#E64A19] transition text-white text-sm font-semibold px-5 py-2.5 rounded-md shadow-sm">
-            {currentUser ? 'Log Aktivitas' : 'Login'}
-          </button>
+          {currentUser && <button onClick={handleLogout} className="text-sm font-semibold text-gray-500 hover:text-red-500 transition hidden md:block">Logout</button>}
+          {/* Tombol Login/Nav Mobile */}
+          {!currentUser ? (
+             <button onClick={() => setActiveTab('auth')} className="bg-[#FF5722] hover:bg-[#E64A19] transition text-white text-sm font-semibold px-5 py-2.5 rounded-md shadow-sm">Login</button>
+          ) : (
+            <div className="md:hidden flex gap-3">
+               <button onClick={() => setActiveTab('history')} className={`p-2 rounded-md ${activeTab === 'history' ? 'bg-orange-100 text-[#FF5722]' : 'text-gray-500'}`}><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 8v4l3 3"/><circle cx="12" cy="12" r="10"/></svg></button>
+               <button onClick={() => setActiveTab('profile')} className={`p-2 rounded-md ${activeTab === 'profile' ? 'bg-orange-100 text-[#FF5722]' : 'text-gray-500'}`}><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></button>
+            </div>
+          )}
         </div>
       </nav>
 
-      <main className="max-w-7xl mx-auto px-6 mt-8">
+      <main className="max-w-7xl mx-auto px-4 md:px-6 mt-8">
         
         {/* ================= DASHBOARD ================= */}
         {activeTab === 'dashboard' && (
           <div>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-              <StatCard title="Total Aktivitas" value={currentUser ? myActivities.length.toString() : "0"} unit="sesi" icon={<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#FF5722" strokeWidth="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2" /></svg>} bg="bg-orange-50"/>
-              <StatCard title="Target Tercapai" value={currentUser ? `${totalPercent}` : "0"} unit="%" icon={<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#00C853" strokeWidth="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>} bg="bg-green-50"/>
-              <StatCard title="Total FitPoin" value={currentUser ? myTotalXp.toString() : "0"} unit="XP" icon={<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#651FFF" strokeWidth="2"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></svg>} bg="bg-indigo-50"/>
-              <StatCard title="Streak Mingguan" value="0" unit="minggu" icon={<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#FF1744" strokeWidth="2"><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/></svg>} bg="bg-red-50"/>
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+              <StatCard title="Total Sesi" value={currentUser ? myActivities.length.toString() : "0"} unit="sesi" icon={<span className="text-xl">🔥</span>} bg="bg-orange-50"/>
+              <StatCard title="Target" value={currentUser ? `${totalPercent}` : "0"} unit="%" icon={<span className="text-xl">🎯</span>} bg="bg-green-50"/>
+              <StatCard title="Pangkat" value={currentUser ? getBadge(myTotalXp).label : "-"} unit="" icon={<span className="text-xl">{currentUser ? getBadge(myTotalXp).icon : '🏅'}</span>} bg="bg-indigo-50"/>
+              <StatCard title="Total FitPoin" value={currentUser ? myTotalXp.toString() : "0"} unit="XP" icon={<span className="text-xl">⚡</span>} bg="bg-yellow-50"/>
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -400,49 +456,54 @@ export default function Page() {
                   </div>
                 </div>
 
-                {/* Linimasa */}
+                {/* Linimasa Komunitas dengan Gamifikasi Badge */}
                 <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
                   <div className="mb-6">
-                    <h2 className="text-lg font-bold text-gray-900">Linimasa Aktivitas Circle</h2>
-                    <p className="text-sm text-gray-500 mt-1">Lihat aktivitas terbaru dari komunitas (MongoDB cloud synced)</p>
+                    <h2 className="text-lg font-bold text-gray-900">Linimasa Komunitas</h2>
+                    <p className="text-sm text-gray-500 mt-1">Aktivitas terbaru dari circle MongoDB</p>
                   </div>
-                  <div className="space-y-4 max-h-[600px] overflow-y-auto">
+                  <div className="space-y-4 max-h-[600px] overflow-y-auto pr-2">
                     {allActivities.length === 0 ? (
                       <div className="text-center py-6 text-gray-400 text-sm">Belum ada aktivitas di database. Mulai latihan pertama Anda!</div>
                     ) : (
-                      allActivities.map((log) => (
-                        <div key={log.id} className="border border-gray-100 rounded-lg p-4 shadow-sm bg-[#FCFDFE]">
-                          <div className="flex items-start gap-4">
-                            <div className="w-12 h-12 rounded-full bg-[#FF5722] flex items-center justify-center text-white font-bold shrink-0 uppercase">
-                              {log.userName ? log.userName.substring(0, 2) : 'FP'}
-                            </div>
-                            <div className="flex-1">
-                              <div className="flex items-center justify-between">
-                                <div className="flex items-center gap-2">
-                                  <h3 className="font-semibold text-gray-900 text-sm">{log.userName}</h3>
-                                  <span className="text-xs text-gray-400">• {log.date}</span>
+                      allActivities.map((log) => {
+                        const userXp = getUserTotalXP(log.userId);
+                        const badge = getBadge(userXp);
+                        return (
+                          <div key={log.id} className="border border-gray-100 rounded-xl p-4 shadow-sm bg-white">
+                            <div className="flex items-start gap-4">
+                              <div className="w-12 h-12 rounded-full bg-[#FF5722] flex items-center justify-center text-white font-bold shrink-0 shadow-inner uppercase">
+                                {log.userName ? log.userName.substring(0, 2) : 'FP'}
+                              </div>
+                              <div className="flex-1">
+                                <div className="flex items-center justify-between">
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <h3 className="font-bold text-gray-900 text-sm">{log.userName}</h3>
+                                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${badge.color} flex items-center gap-1`}>
+                                      {badge.icon} {badge.label}
+                                    </span>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-xs text-gray-400 whitespace-nowrap">{log.date.split(',')[1]}</span>
+                                    {currentUser?.id === log.userId && (
+                                      <button onClick={() => handleDeleteActivity(log.id)} className="text-gray-400 hover:text-red-500 transition" title="Hapus">
+                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 6h18M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2M10 11v6M14 11v6"/></svg>
+                                      </button>
+                                    )}
+                                  </div>
                                 </div>
-                                {currentUser?.id === log.userId && (
-                                  <button onClick={() => handleDeleteActivity(log.id)} className="text-gray-400 hover:text-red-500 p-1 rounded transition" title="Hapus Aktivitas">
-                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 6h18M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2M10 11v6M14 11v6"/></svg>
-                                  </button>
-                                )}
-                              </div>
-                              <div className="text-sm text-gray-600 mt-1 flex items-center gap-1">
-                                <span>
-                                  {log.type === 'Push Up' && '💪'} {log.type === 'Sit Up' && '🧘'} {log.type === 'Pull Up' && '🏋️'}
-                                  {log.type === 'Squat' && '🦵'} {log.type === 'Plank' && '⚡'} {log.type === 'Perfect Run' && '🏃'}
-                                </span> {log.type}
-                              </div>
-                              {log.sessionName !== log.userName && <p className="text-gray-900 font-medium mt-3 mb-4">{log.sessionName}</p>}
-                              <div className="flex gap-4 text-sm mt-3">
-                                <span className="flex items-center gap-1 text-gray-600"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M6 3v18M18 3v18M3 8h18M3 16h18"/></svg>{log.detail}</span>
-                                <span className="flex items-center gap-1 text-[#FF5722] font-medium"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m3 17 6-6 4 4 8-8"/><path d="M17 7h4v4"/></svg>+{log.xp} XP</span>
+                                <div className="mt-2 bg-slate-50 border border-slate-100 rounded-lg p-3">
+                                  <p className="text-sm font-semibold text-gray-800">{log.sessionName} <span className="text-gray-400 font-normal">({log.type})</span></p>
+                                  <div className="flex justify-between items-end mt-2">
+                                    <span className="text-sm text-gray-600 bg-white border border-gray-200 px-2 py-1 rounded shadow-sm">{log.detail}</span>
+                                    <span className="font-bold text-[#FF5722] text-sm flex items-center gap-1">+{log.xp} XP</span>
+                                  </div>
+                                </div>
                               </div>
                             </div>
                           </div>
-                        </div>
-                      ))
+                        )
+                      })
                     )}
                   </div>
                 </div>
@@ -450,62 +511,19 @@ export default function Page() {
 
               {/* Form Input Latihan & Klasemen */}
               <div className="space-y-6">
-                <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
+                
+                {/* Form Desktop (Disembunyikan di Layar Kecil karena ada Modal FAB) */}
+                <div className="hidden md:block bg-white rounded-xl border border-gray-200 shadow-sm p-6">
                   <div className="mb-6">
                     <h2 className="text-lg font-bold text-gray-900">Catat Progress Fisik</h2>
-                    <p className="text-sm text-gray-500 mt-1">Tambahkan aktivitas latihan Anda ke cloud</p>
+                    <p className="text-sm text-gray-500 mt-1">Tambahkan aktivitas ke cloud</p>
                   </div>
-                  <form onSubmit={handleSaveActivity} className="space-y-4">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Nama Sesi Latihan</label>
-                      <input type="text" value={sessionName} onChange={(e) => setSessionName(e.target.value)} placeholder="Contoh: Morning Run" className="w-full bg-gray-50 border border-gray-200 rounded-md px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#FF5722]/20"/>
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Jenis Latihan</label>
-                      <div className="relative">
-                        <select value={exerciseType} onChange={(e) => { setExerciseType(e.target.value); setReps(''); setSets(''); setDistance(''); setDuration(''); }} className="w-full bg-gray-50 border border-gray-200 rounded-md px-4 py-2.5 text-sm appearance-none focus:outline-none focus:ring-2 focus:ring-[#FF5722]/20 text-gray-800">
-                          <option value="Push Up">Push Up 💪</option>
-                          <option value="Sit Up">Sit Up 🧘</option>
-                          <option value="Pull Up">Pull Up 🏋️</option>
-                          <option value="Squat">Squat 🦵</option>
-                          <option value="Plank">Plank ⚡</option>
-                          <option value="Perfect Run">Perfect Run 🏃</option>
-                        </select>
-                        <div className="absolute right-3 top-3 pointer-events-none text-gray-400"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m6 9 6 6 6-6"/></svg></div>
-                      </div>
-                    </div>
-                    {exerciseType === 'Perfect Run' && (
-                      <div className="grid grid-cols-2 gap-4">
-                        <div><label className="block text-sm font-medium text-gray-700 mb-1">Jarak (KM)</label><input type="number" step="0.1" value={distance} onChange={(e) => setDistance(e.target.value)} placeholder="0.0" className="w-full bg-gray-50 border border-gray-200 rounded-md px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#FF5722]/20"/></div>
-                        <div><label className="block text-sm font-medium text-gray-700 mb-1">Durasi (menit)</label><input type="number" value={duration} onChange={(e) => setDuration(e.target.value)} placeholder="0" className="w-full bg-gray-50 border border-gray-200 rounded-md px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#FF5722]/20"/></div>
-                      </div>
-                    )}
-                    {exerciseType === 'Plank' && (
-                      <div><label className="block text-sm font-medium text-gray-700 mb-1">Durasi (menit)</label><input type="number" value={duration} onChange={(e) => setDuration(e.target.value)} placeholder="0" className="w-full bg-gray-50 border border-gray-200 rounded-md px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#FF5722]/20"/></div>
-                    )}
-                    {['Push Up', 'Sit Up', 'Pull Up', 'Squat'].includes(exerciseType) && (
-                      <div className="grid grid-cols-2 gap-4">
-                        <div><label className="block text-sm font-medium text-gray-700 mb-1">Reps</label><input type="number" value={reps} onChange={(e) => setReps(e.target.value)} placeholder="0" className="w-full bg-gray-50 border border-gray-200 rounded-md px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#FF5722]/20"/></div>
-                        <div><label className="block text-sm font-medium text-gray-700 mb-1">Set</label><input type="number" value={sets} onChange={(e) => setSets(e.target.value)} placeholder="0" className="w-full bg-gray-50 border border-gray-200 rounded-md px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#FF5722]/20"/></div>
-                      </div>
-                    )}
-                    <div className="bg-gray-100 rounded-md p-4 mt-2">
-                      <p className="text-sm text-gray-500 mb-1">Estimasi FitPoin didapat:</p>
-                      <p className="text-xl font-bold text-[#FF5722]">+{currentXP} XP</p>
-                    </div>
-                    <button type="submit" className="w-full bg-[#FF5722] hover:bg-[#E64A19] text-white font-semibold py-3 rounded-md transition mt-4 shadow-sm">
-                      Simpan & Tarung Klasemen
-                    </button>
-                  </form>
+                  {renderActivityForm()}
                 </div>
 
-                {/* Klasemen */}
+                {/* Klasemen Gamifikasi */}
                 <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
-                  <div className="mb-6"><h2 className="text-lg font-bold text-gray-900">Klasemen Liga Latihan</h2><p className="text-sm text-gray-500 mt-1">Peringkat komunitas realtime dari MongoDB</p></div>
-                  <div className="flex bg-gray-100 p-1 rounded-lg mb-6">
-                    <button className="flex-1 bg-white shadow-sm py-1.5 text-sm font-medium rounded-md text-gray-800">Pekan Ini</button>
-                    <button className="flex-1 py-1.5 text-sm font-medium text-gray-500 hover:text-gray-700">Bulan Ini</button>
-                  </div>
+                  <div className="mb-6"><h2 className="text-lg font-bold text-gray-900">Klasemen Liga</h2><p className="text-sm text-gray-500 mt-1">Peringkat komunitas realtime</p></div>
                   
                   {leaderboard.length === 0 ? (
                     <div className="flex flex-col items-center justify-center text-center py-6 text-gray-400">
@@ -514,15 +532,21 @@ export default function Page() {
                     </div>
                   ) : (
                     <div className="space-y-3">
-                      {leaderboard.map((player, idx) => (
-                        <div key={idx} className={`flex items-center justify-between p-3 rounded-lg border ${currentUser?.id === player.id ? 'bg-orange-50 border-orange-100' : 'bg-gray-50 border-gray-100'}`}>
-                           <div className="flex items-center gap-3">
-                             <span className="font-bold text-gray-400 text-sm">{idx + 1}</span>
-                             <span className="font-semibold text-sm text-gray-800">{player.name} {currentUser?.id === player.id && <span className="text-xs text-[#FF5722] font-normal">(Anda)</span>}</span>
-                           </div>
-                           <span className="font-bold text-[#FF5722] text-sm">{player.xp} XP</span>
-                        </div>
-                      ))}
+                      {leaderboard.map((player, idx) => {
+                        const badge = getBadge(player.xp);
+                        return (
+                          <div key={idx} className={`flex items-center justify-between p-3 rounded-lg border ${currentUser?.id === player.id ? 'bg-orange-50 border-orange-200 shadow-sm' : 'bg-gray-50 border-gray-100'}`}>
+                            <div className="flex items-center gap-3">
+                              <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${idx < 3 ? 'bg-orange-100 text-[#FF5722]' : 'bg-gray-200 text-gray-600'}`}>{idx + 1}</div>
+                              <div>
+                                  <p className="font-bold text-sm text-gray-800 leading-tight">{player.name} {currentUser?.id === player.id && <span className="text-[#FF5722] font-normal text-xs ml-1">(Anda)</span>}</p>
+                                  <p className="text-[10px] text-gray-500 mt-0.5 flex items-center gap-1">{badge.icon} {badge.label}</p>
+                              </div>
+                            </div>
+                            <span className="font-bold text-[#FF5722] text-sm bg-white px-2 py-1 rounded shadow-sm border border-gray-100">{player.xp} XP</span>
+                          </div>
+                        )
+                      })}
                     </div>
                   )}
                 </div>
@@ -575,7 +599,7 @@ export default function Page() {
 
               {historyView === 'ringkasan' ? (
                 <div className="space-y-6">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+                  <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
                     <div className="border border-gray-200 rounded-xl p-5 bg-white shadow-sm">
                       <p className="text-xs font-medium text-gray-400 mb-3">Total Aktivitas</p>
                       <p className="text-2xl font-bold text-[#FF5722]">{myActivities.length}</p>
@@ -596,9 +620,9 @@ export default function Page() {
                     </div>
                   </div>
 
-                  {/* DIAGRAM BATANG KOMPARASI DUA DATA */}
-                  <div className="mt-8 pt-2">
-                    <h3 className="text-base font-bold text-gray-900 mb-6">Aktivitas per Jenis Latihan</h3>
+                  {/* DIAGRAM BATANG KOMPARASI DUA DATA (Sama Persis seperti sebelumnya) */}
+                  <div className="mt-8 pt-2 overflow-x-auto">
+                    <h3 className="text-base font-bold text-gray-900 mb-6 min-w-[500px]">Aktivitas per Jenis Latihan</h3>
                     
                     {(() => {
                       const rawChartData = Array.from(new Set(myActivities.map(a => a.type))).map(type => {
@@ -615,7 +639,7 @@ export default function Page() {
                       const maxY = Math.max(12, Math.ceil(maxDataValue / 3) * 3);
 
                       return (
-                        <div className="relative w-full pt-4">
+                        <div className="relative w-full pt-4 min-w-[500px]">
                           <div className="absolute left-0 top-4 bottom-12 w-8 flex flex-col justify-between text-xs text-gray-400 text-right pr-2 select-none font-medium">
                             <span>{maxY}</span>
                             <span>{maxY * 0.75}</span>
@@ -639,22 +663,21 @@ export default function Page() {
                                 const heightPoints = (d.points / maxY) * 100;
 
                                 return (
-                                  <div key={index} className="flex flex-col items-center h-full justify-end relative group w-full max-w-[180px]">
+                                  <div key={index} className="flex flex-col items-center h-full justify-end relative group w-full max-w-[120px]">
                                     <div className="flex items-end justify-center gap-1 w-full h-full">
-                                      <div className="w-12 bg-[#FF5722] rounded-t-sm transition-all duration-300 relative hover:brightness-95 cursor-pointer" style={{ height: `${heightJumlah}%` }}>
+                                      <div className="w-8 md:w-12 bg-[#FF5722] rounded-t-sm transition-all duration-300 relative hover:brightness-95 cursor-pointer" style={{ height: `${heightJumlah}%` }}>
                                         <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 bg-slate-800 text-white text-[11px] py-1 px-2 rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-30 shadow-md">
-                                          Jumlah Aktivitas: {d.jumlah}
+                                          Jumlah: {d.jumlah}
                                         </div>
                                       </div>
 
-                                      <div className="w-12 bg-[#00D09C] rounded-t-sm transition-all duration-300 relative hover:brightness-95 cursor-pointer" style={{ height: `${heightPoints}%` }}>
+                                      <div className="w-8 md:w-12 bg-[#00D09C] rounded-t-sm transition-all duration-300 relative hover:brightness-95 cursor-pointer" style={{ height: `${heightPoints}%` }}>
                                         <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 bg-slate-800 text-white text-[11px] py-1 px-2 rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-30 shadow-md">
-                                          Total Points: {d.points} XP
+                                          Total: {d.points} XP
                                         </div>
                                       </div>
                                     </div>
-
-                                    <div className="absolute top-full mt-2 text-xs font-semibold text-gray-500 tracking-tight">
+                                    <div className="absolute top-full mt-2 text-xs font-semibold text-gray-500 tracking-tight text-center w-full">
                                       {d.name}
                                     </div>
                                   </div>
@@ -665,12 +688,10 @@ export default function Page() {
 
                           <div className="flex justify-center items-center gap-6 mt-12 select-none">
                             <div className="flex items-center gap-2 text-xs font-bold text-gray-700">
-                              <span className="w-4 h-2.5 bg-[#FF5722] inline-block rounded-sm"></span>
-                              Jumlah Aktivitas
+                              <span className="w-4 h-2.5 bg-[#FF5722] inline-block rounded-sm"></span> Jumlah Aktivitas
                             </div>
                             <div className="flex items-center gap-2 text-xs font-bold text-gray-700">
-                              <span className="w-4 h-2.5 bg-[#00D09C] inline-block rounded-sm"></span>
-                              Total Points
+                              <span className="w-4 h-2.5 bg-[#00D09C] inline-block rounded-sm"></span> Total Points
                             </div>
                           </div>
                         </div>
@@ -683,23 +704,23 @@ export default function Page() {
                   <table className="w-full text-left text-sm whitespace-nowrap">
                     <thead>
                       <tr className="border-b border-gray-200 text-gray-400">
-                        <th className="py-3 font-semibold">Tanggal Log</th>
-                        <th className="py-3 font-semibold">Nama Sesi</th>
-                        <th className="py-3 font-semibold">Jenis Latihan</th>
-                        <th className="py-3 font-semibold">Detail Capaian</th>
-                        <th className="py-3 font-semibold">Poin</th>
-                        <th className="py-3 font-semibold text-center">Aksi</th>
+                        <th className="py-3 font-semibold px-2">Tanggal</th>
+                        <th className="py-3 font-semibold px-2">Sesi</th>
+                        <th className="py-3 font-semibold px-2">Jenis</th>
+                        <th className="py-3 font-semibold px-2">Detail</th>
+                        <th className="py-3 font-semibold px-2">Poin</th>
+                        <th className="py-3 font-semibold text-center px-2">Aksi</th>
                       </tr>
                     </thead>
                     <tbody>
                       {myActivities.map(log => (
                         <tr key={log.id} className="border-b border-gray-100 hover:bg-slate-50/30 transition">
-                          <td className="py-4 text-gray-500">{log.date}</td>
-                          <td className="py-4 font-semibold text-gray-900">{log.sessionName}</td>
-                          <td className="py-4"><span className="bg-slate-100 text-gray-700 px-2 py-1 rounded-md text-xs font-medium">{log.type}</span></td>
-                          <td className="py-4 text-gray-600">{log.detail}</td>
-                          <td className="py-4 font-bold text-[#FF5722]">+{log.xp} XP</td>
-                          <td className="py-4 text-center">
+                          <td className="py-4 text-gray-500 px-2">{log.date.split(',')[0]}</td>
+                          <td className="py-4 font-semibold text-gray-900 px-2">{log.sessionName}</td>
+                          <td className="py-4 px-2"><span className="bg-slate-100 text-gray-700 px-2 py-1 rounded-md text-xs font-medium">{log.type}</span></td>
+                          <td className="py-4 text-gray-600 px-2">{log.detail}</td>
+                          <td className="py-4 font-bold text-[#FF5722] px-2">+{log.xp} XP</td>
+                          <td className="py-4 text-center px-2">
                             <button onClick={() => handleDeleteActivity(log.id)} className="text-gray-400 hover:text-red-500 p-1.5 transition inline-flex items-center rounded" title="Hapus Permanen">
                               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 6h18M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2M10 11v6M14 11v6"/></svg>
                             </button>
@@ -717,7 +738,9 @@ export default function Page() {
         {/* ================= PROFIL ================= */}
         {activeTab === 'profile' && currentUser && (
           <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6 max-w-xl mx-auto">
-            <h2 className="text-xl font-bold text-gray-900 mb-6 border-b pb-4">Profil Data User</h2>
+            <h2 className="text-xl font-bold text-gray-900 mb-6 border-b pb-4 flex items-center gap-2">
+              Profil User <span className="bg-orange-100 text-[#FF5722] text-xs px-2 py-1 rounded-full">{getBadge(myTotalXp).label}</span>
+            </h2>
             <form onSubmit={handleUpdateProfile} className="space-y-4">
               <div><label className="block text-sm font-medium mb-1">Nama Lengkap</label><input type="text" value={currentUser.fullName} onChange={e => setCurrentUser({...currentUser, fullName: e.target.value})} className="w-full bg-gray-50 border border-gray-200 rounded-md px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#FF5722]/20"/></div>
               <div className="grid grid-cols-2 gap-4">
@@ -725,22 +748,54 @@ export default function Page() {
                 <div><label className="block text-sm font-medium mb-1">Berat Badan (kg)</label><input type="number" value={currentUser.weight} onChange={e => setCurrentUser({...currentUser, weight: e.target.value})} className="w-full bg-gray-50 border border-gray-200 rounded-md px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#FF5722]/20"/></div>
               </div>
               <div><label className="block text-sm font-medium mb-1">Tanggal Lahir</label><input type="date" value={currentUser.birthDate} onChange={e => setCurrentUser({...currentUser, birthDate: e.target.value})} className="w-full bg-gray-50 border border-gray-200 rounded-md px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#FF5722]/20 text-gray-700"/></div>
-              <button type="submit" className="w-full bg-[#FF5722] hover:bg-[#E64A19] text-white font-semibold py-3 rounded-md mt-4 transition">Simpan Perubahan</button>
+              <button type="submit" className="w-full bg-[#FF5722] hover:bg-[#E64A19] text-white font-semibold py-3 rounded-md mt-4 transition shadow-sm">Simpan Perubahan</button>
             </form>
           </div>
         )}
 
       </main>
+
+      {/* ================= FLOATING ACTION BUTTON (MOBILE ONLY) ================= */}
+      {currentUser && activeTab === 'dashboard' && (
+        <button 
+          onClick={() => setShowAddModal(true)}
+          className="md:hidden fixed bottom-6 right-6 w-14 h-14 bg-[#FF5722] text-white rounded-full shadow-lg shadow-[#FF5722]/40 flex items-center justify-center z-40 transform hover:scale-105 active:scale-95 transition border-2 border-white"
+        >
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+        </button>
+      )}
+
+      {/* ================= MODAL FORM (MOBILE ONLY) ================= */}
+      {showAddModal && (
+        <div className="md:hidden fixed inset-0 z-50 flex items-end justify-center bg-slate-900/60 backdrop-blur-sm">
+          <div className="bg-white w-full max-h-[90vh] overflow-y-auto rounded-t-3xl p-6 pb-10 shadow-2xl animate-slide-up">
+            <div className="flex justify-between items-center mb-6">
+              <div>
+                <h2 className="text-xl font-bold text-gray-900">Catat Latihan</h2>
+                <p className="text-xs text-gray-500 mt-1">Sistem cicil: buat log sebanyak yang kamu mau</p>
+              </div>
+              <button onClick={() => setShowAddModal(false)} className="bg-gray-100 p-2 rounded-full text-gray-500 hover:bg-gray-200 transition">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+              </button>
+            </div>
+            {renderActivityForm()}
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
 
-/* --- REUSABLE COMPONENTS --- */
+// ================= REUSABLE COMPONENTS =================
 function StatCard({ title, value, unit, icon, bg }: { title: string, value: string, unit: string, icon: React.ReactNode, bg: string }) {
   return (
-    <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm flex items-center gap-4">
-      <div className={`w-12 h-12 rounded-lg flex items-center justify-center shrink-0 ${bg}`}>{icon}</div>
-      <div><p className="text-sm text-gray-500 font-medium">{title}</p><p className="text-2xl font-bold text-gray-900 mt-0.5">{value} <span className="text-sm font-normal text-gray-500">{unit}</span></p></div>
+    <div className={`p-4 md:p-5 rounded-2xl border border-gray-100 shadow-sm flex flex-col gap-2 ${bg}`}>
+      <div className="flex justify-between items-start">
+        <p className="text-xs text-gray-600 font-bold uppercase tracking-wider">{title}</p>
+        <div className="w-8 h-8 rounded-full bg-white/60 flex items-center justify-center shadow-sm">{icon}</div>
+      </div>
+      <p className="text-2xl md:text-3xl font-black text-gray-900 mt-1">{value} <span className="text-sm font-semibold text-gray-500">{unit}</span></p>
     </div>
   );
 }
@@ -749,10 +804,15 @@ function TargetItem({ icon, name, progress, percent, color, pctValue }: { icon: 
   return (
     <div>
       <div className="flex justify-between items-center mb-2">
-        <div className="flex items-center gap-3"><span className="text-xl">{icon}</span><div><h3 className="text-sm font-bold text-gray-900">{name}</h3><p className="text-xs text-gray-500">{progress}</p></div></div>
-        <span className={`text-xs font-bold ${pctValue === 0 ? 'text-gray-400' : 'text-[#FF5722]'}`}>{percent}</span>
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-lg bg-gray-50 flex items-center justify-center text-xl shadow-inner border border-gray-100">{icon}</div>
+          <div><h3 className="text-sm font-bold text-gray-900">{name}</h3><p className="text-xs text-gray-500 font-medium">{progress}</p></div>
+        </div>
+        <span className={`text-xs font-bold px-2 py-1 rounded-md ${pctValue === 0 ? 'bg-gray-100 text-gray-400' : 'bg-orange-50 text-[#FF5722]'}`}>{percent}</span>
       </div>
-      <div className="w-full bg-gray-100 rounded-full h-2"><div className={`${color} h-2 rounded-full transition-all`} style={{ width: `${pctValue}%` }}></div></div>
+      <div className="w-full bg-gray-100 rounded-full h-2.5 overflow-hidden shadow-inner">
+        <div className={`${color} h-2.5 rounded-full transition-all duration-1000 ease-out`} style={{ width: `${pctValue}%` }}></div>
+      </div>
     </div>
   );
 }
