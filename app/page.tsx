@@ -170,7 +170,7 @@ export default function Page() {
   };
   const currentXP = calculateXP();
 
-  // ================= SIMPAN AKTIVITAS BARU/AKUMULASI KE MONGODB =================
+  // ================= SIMPAN AKTIVITAS BARU (SISTEM CICIL) KE MONGODB =================
   const handleSaveActivity = (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentUser) {
@@ -179,56 +179,42 @@ export default function Page() {
     }
     if (!sessionName.trim()) return alert('Nama sesi latihan harus diisi!');
 
-    let targetActivity: ActivityLog;
-    const existingIndex = allActivities.findIndex(a => a.userId === currentUser.id && a.type === exerciseType);
+    // Membuat string detail berdasarkan jenis latihan
+    let detailString = '';
+    if (['Push Up', 'Sit Up', 'Pull Up', 'Squat'].includes(exerciseType)) detailString = `${reps || 0} reps × ${sets || 0} set`;
+    else if (exerciseType === 'Plank') detailString = `${duration || 0} menit`;
+    else if (exerciseType === 'Perfect Run') detailString = `${distance || 0} KM • ${duration || 0} menit`;
 
-    if (existingIndex !== -1) {
-      const item = { ...allActivities[existingIndex] };
-      item.reps += parseInt(reps) || 0;
-      item.sets += parseInt(sets) || 0;
-      item.duration += parseInt(duration) || 0;
-      item.distance += parseFloat(distance) || 0;
-      item.xp += currentXP;
-      item.date = new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'short' }) + ', ' + new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
-      item.sessionName = sessionName; 
-      
-      if (['Push Up', 'Sit Up', 'Pull Up', 'Squat'].includes(exerciseType)) item.detail = `${item.reps} reps × ${item.sets} set`;
-      else if (exerciseType === 'Plank') item.detail = `${item.duration} menit`;
-      else if (exerciseType === 'Perfect Run') item.detail = `${item.distance} KM • ${item.duration} menit`;
-      
-      targetActivity = item;
-    } else {
-      let detailString = '';
-      if (['Push Up', 'Sit Up', 'Pull Up', 'Squat'].includes(exerciseType)) detailString = `${reps || 0} reps × ${sets || 0} set`;
-      else if (exerciseType === 'Plank') detailString = `${duration || 0} menit`;
-      else if (exerciseType === 'Perfect Run') detailString = `${distance || 0} KM • ${duration || 0} menit`;
-
-      targetActivity = {
-        id: Date.now().toString(),
-        userId: currentUser.id,
-        userName: currentUser.fullName,
-        sessionName: sessionName,
-        type: exerciseType,
-        date: new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'short' }) + ', ' + new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }),
-        detail: detailString,
-        xp: currentXP,
-        reps: parseInt(reps) || 0,
-        sets: parseInt(sets) || 0,
-        duration: parseInt(duration) || 0,
-        distance: parseFloat(distance) || 0
-      };
-    }
+    // SELALU MEMBUAT ENTRY BARU AGAR BISA DICICIL (Menghindari replaceOne _id error)
+    const targetActivity: ActivityLog = {
+      id: 'act_' + Date.now().toString() + Math.random().toString(36).substring(2, 7), // ID Unik
+      userId: currentUser.id,
+      userName: currentUser.fullName,
+      sessionName: sessionName,
+      type: exerciseType,
+      date: new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'short' }) + ', ' + new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }),
+      detail: detailString,
+      xp: currentXP,
+      reps: parseInt(reps) || 0,
+      sets: parseInt(sets) || 0,
+      duration: parseInt(duration) || 0,
+      distance: parseFloat(distance) || 0
+    };
 
     fetch('/api/data', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'save_activity', activity: targetActivity })
     })
-    .then(res => {
-      if (!res.ok) throw new Error('Gagal menyimpan aktivitas latihan');
+    .then(async res => {
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Gagal menyimpan aktivitas latihan');
+      
+      // Reset Form setelah sukses
       setSessionName(''); setReps(''); setSets(''); setDistance(''); setDuration('');
+      
       refreshDataFromDatabase();
-      alert('Aktivitas berhasil disimpan dan disinkronkan ke MongoDB!');
+      alert('Aktivitas berhasil dicatat! Lanjutkan cicilan latihanmu.');
     })
     .catch(err => alert(err.message));
   };
@@ -250,7 +236,7 @@ export default function Page() {
     .catch(err => alert(err.message));
   };
 
-  // PROGRESS TARGET
+  // PROGRESS TARGET (Otomatis Menjumlahkan Seluruh Cicilan)
   const getProgress = (type: string) => {
     if (!currentUser) return 0;
     const acts = allActivities.filter(a => a.userId === currentUser.id && a.type === type);
