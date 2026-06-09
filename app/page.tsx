@@ -25,6 +25,7 @@ interface ActivityLog {
   sets: number;
   duration: number;
   distance: number;
+  timestamp: number; // Ditambahkan untuk sistem Weekly Quest
 }
 
 export default function Page() {
@@ -87,6 +88,37 @@ export default function Page() {
     if (savedSession) setCurrentUser(JSON.parse(savedSession));
     refreshDataFromDatabase();
   }, []);
+
+  // ================= GLOBAL WEEKLY QUEST LOGIC =================
+  const QUEST_TARGET = 500;
+  const QUEST_TYPE = 'Push Up';
+
+  // Deteksi hari Senin minggu ini dan minggu lalu (00:00)
+  const getStartOfWeek = (date: Date) => {
+    const d = new Date(date);
+    const day = d.getDay();
+    const diff = d.getDate() - day + (day === 0 ? -6 : 1);
+    return new Date(d.setDate(diff)).setHours(0, 0, 0, 0);
+  };
+
+  const startOfThisWeek = getStartOfWeek(new Date());
+  const startOfLastWeek = startOfThisWeek - 7 * 24 * 60 * 60 * 1000;
+
+  // Filter data untuk Kalkulasi Global
+  const thisWeekActivities = allActivities.filter(a => a.timestamp && a.timestamp >= startOfThisWeek);
+  const lastWeekActivities = allActivities.filter(a => a.timestamp && a.timestamp >= startOfLastWeek && a.timestamp < startOfThisWeek);
+
+  const thisWeekProgress = thisWeekActivities.filter(a => a.type === QUEST_TYPE).reduce((sum, a) => sum + (a.reps * a.sets), 0);
+  const lastWeekProgress = lastWeekActivities.filter(a => a.type === QUEST_TYPE).reduce((sum, a) => sum + (a.reps * a.sets), 0);
+
+  // Status Multiplier
+  const isMultiplierActive = lastWeekProgress >= QUEST_TARGET;
+  const xpMultiplier = isMultiplierActive ? 1.2 : 1.0;
+
+  // Helper untuk kontribusi per user
+  const getUserQuestContribution = (userId: string, weekActivities: ActivityLog[]) => {
+    return weekActivities.filter(a => a.userId === userId && a.type === QUEST_TYPE).reduce((sum, a) => sum + (a.reps * a.sets), 0);
+  };
 
   // ================= AUTH LOGIC =================
   const handleAuthSubmit = (e: React.FormEvent) => {
@@ -157,10 +189,12 @@ export default function Page() {
   };
 
   const calculateXP = () => {
-    if (['Push Up', 'Sit Up', 'Pull Up', 'Squat'].includes(exerciseType)) return (parseInt(reps) || 0) * (parseInt(sets) || 0) * 0.5; 
-    if (exerciseType === 'Plank') return (parseInt(duration) || 0) * 10;
-    if (exerciseType === 'Perfect Run') return Math.floor((parseFloat(distance) || 0) * 50);
-    return 0;
+    let baseXP = 0;
+    if (['Push Up', 'Sit Up', 'Pull Up', 'Squat'].includes(exerciseType)) baseXP = (parseInt(reps) || 0) * (parseInt(sets) || 0) * 0.5; 
+    else if (exerciseType === 'Plank') baseXP = (parseInt(duration) || 0) * 10;
+    else if (exerciseType === 'Perfect Run') baseXP = Math.floor((parseFloat(distance) || 0) * 50);
+    
+    return Math.floor(baseXP * xpMultiplier); // Implementasi Multiplier
   };
   const currentXP = calculateXP();
 
@@ -179,12 +213,13 @@ export default function Page() {
     else if (exerciseType === 'Perfect Run') detailString = `${distance || 0} KM • ${duration || 0} menit`;
 
     const targetActivity: ActivityLog = {
-      id: 'act_' + Date.now().toString() + Math.random().toString(36).substring(2, 7), // ID Unik agar bisa dicicil
+      id: 'act_' + Date.now().toString() + Math.random().toString(36).substring(2, 7), 
       userId: currentUser.id,
       userName: currentUser.fullName,
       sessionName: sessionName,
       type: exerciseType,
       date: new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'short' }) + ', ' + new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }),
+      timestamp: Date.now(), // Penting untuk Weekly Quest Reset
       detail: detailString,
       xp: currentXP,
       reps: parseInt(reps) || 0,
@@ -250,7 +285,22 @@ export default function Page() {
   const doneTargets = targets.filter(t => getProgress(t.key) >= t.max).length;
   const totalPercent = Math.min(Math.floor((doneTargets / targets.length) * 100), 100);
 
-  const leaderboard = allUsers.map(u => ({ id: u.id, name: u.fullName, xp: getUserTotalXP(u.id) })).sort((a, b) => b.xp - a.xp).filter(u => u.xp > 0);
+  // Leaderboard Data (Diupdate dengan label Champion / Pasif)
+  const leaderboard = allUsers.map(u => {
+    const xp = getUserTotalXP(u.id);
+    const thisWeekContrib = getUserQuestContribution(u.id, thisWeekActivities);
+    const lastWeekContrib = getUserQuestContribution(u.id, lastWeekActivities);
+    
+    let statusBadge = null;
+    if (isMultiplierActive && lastWeekContrib > 0) {
+      statusBadge = <span className="ml-2 text-[10px] bg-yellow-100 text-yellow-700 px-2 py-0.5 rounded-full font-bold uppercase tracking-wide">🏆 Champion</span>;
+    } else if (!isMultiplierActive && lastWeekContrib === 0 && allActivities.length > 0) {
+      statusBadge = <span className="ml-2 text-[10px] bg-slate-200 text-slate-500 px-2 py-0.5 rounded-full font-bold uppercase tracking-wide">💤 Pasif</span>;
+    }
+
+    return { id: u.id, name: u.fullName, xp, statusBadge, thisWeekContrib };
+  }).sort((a, b) => b.xp - a.xp).filter(u => u.xp > 0);
+
   const myActivities = currentUser ? allActivities.filter(a => a.userId === currentUser.id) : [];
   const myTotalXp = myActivities.reduce((acc, curr) => acc + curr.xp, 0);
 
@@ -291,7 +341,7 @@ export default function Page() {
         </div>
       )}
       <div className="bg-gray-100 rounded-md p-4 mt-2 flex justify-between items-center">
-        <p className="text-sm text-gray-500">Estimasi FitPoin didapat:</p>
+        <p className="text-sm text-gray-500">Estimasi FitPoin {isMultiplierActive && <span className="text-yellow-600 font-bold ml-1">(1.2x Boost!)</span>}:</p>
         <p className="text-xl font-bold text-[#FF5722]">+{currentXP} XP</p>
       </div>
       <button type="submit" className="w-full bg-[#FF5722] hover:bg-[#E64A19] text-white font-semibold py-3 rounded-md transition mt-4 shadow-sm">
@@ -404,7 +454,6 @@ export default function Page() {
 
         <div className="flex items-center gap-4">
           {currentUser && <button onClick={handleLogout} className="text-sm font-semibold text-gray-500 hover:text-red-500 transition hidden md:block">Logout</button>}
-          {/* Tombol Login/Nav Mobile */}
           {!currentUser ? (
              <button onClick={() => setActiveTab('auth')} className="bg-[#FF5722] hover:bg-[#E64A19] transition text-white text-sm font-semibold px-5 py-2.5 rounded-md shadow-sm">Login</button>
           ) : (
@@ -421,6 +470,39 @@ export default function Page() {
         {/* ================= DASHBOARD ================= */}
         {activeTab === 'dashboard' && (
           <div>
+            {/* GLOBAL WEEKLY QUEST BANNER */}
+            <div className="bg-gradient-to-br from-slate-900 to-slate-800 p-6 rounded-2xl shadow-lg relative overflow-hidden text-white mb-6">
+              {isMultiplierActive && (
+                <div className="absolute top-0 right-0 bg-yellow-400 text-yellow-900 text-xs font-black px-4 py-1.5 rounded-bl-xl shadow-sm">
+                  🌟 1.2x XP BOOST AKTIF!
+                </div>
+              )}
+              <div className="flex flex-col md:flex-row justify-between items-start md:items-end mb-5 gap-4">
+                <div>
+                  <h2 className="text-2xl font-black flex items-center gap-2 text-white">
+                    🌍 Misi Global Minggu Ini
+                  </h2>
+                  <p className="text-slate-400 mt-1 font-medium">Target Komunitas: {QUEST_TARGET} {QUEST_TYPE}</p>
+                </div>
+                <div className="text-right">
+                  <p className="text-4xl font-black text-[#FF5722]">{thisWeekProgress} <span className="text-xl text-slate-400 font-bold">/ {QUEST_TARGET}</span></p>
+                </div>
+              </div>
+              
+              {/* Progress Bar Misi Global */}
+              <div className="w-full bg-slate-700/50 rounded-full h-5 mb-3 overflow-hidden shadow-inner p-1">
+                <div className="bg-[#FF5722] h-full rounded-full transition-all duration-1000 relative" style={{ width: `${Math.min((thisWeekProgress / QUEST_TARGET) * 100, 100)}%` }}>
+                  <div className="absolute inset-0 bg-white/20 w-full h-full animate-pulse rounded-full"></div>
+                </div>
+              </div>
+              
+              <p className="text-sm text-slate-300 font-medium bg-slate-800/50 inline-block px-4 py-2 rounded-lg">
+                {thisWeekProgress >= QUEST_TARGET 
+                  ? "🔥 Target Tercapai! Multiplier XP akan berlanjut minggu depan." 
+                  : `Kurang ${QUEST_TARGET - thisWeekProgress} reps lagi untuk menghindari status Pasif (Lethargy). Ayo gotong royong!`}
+              </p>
+            </div>
+
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
               <StatCard title="Total Sesi" value={currentUser ? myActivities.length.toString() : "0"} unit="sesi" icon={<span className="text-xl">🔥</span>} bg="bg-orange-50"/>
               <StatCard title="Target" value={currentUser ? `${totalPercent}` : "0"} unit="%" icon={<span className="text-xl">🎯</span>} bg="bg-green-50"/>
@@ -431,11 +513,11 @@ export default function Page() {
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               <div className="lg:col-span-2 space-y-6">
                 
-                {/* Target Mingguan */}
+                {/* Target Mingguan Personal */}
                 <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
                   <div className="mb-6">
-                    <h2 className="text-lg font-bold text-gray-900">Target Mingguan</h2>
-                    <p className="text-sm text-gray-500 mt-1">Otomatis ter-reset setiap hari Senin jam 00:00</p>
+                    <h2 className="text-lg font-bold text-gray-900">Target Personal</h2>
+                    <p className="text-sm text-gray-500 mt-1">Capaian pribadi Anda dari seluruh aktivitas</p>
                   </div>
                   <div className="space-y-6">
                     {targets.map(t => {
@@ -456,17 +538,17 @@ export default function Page() {
                   </div>
                 </div>
 
-                {/* Linimasa Komunitas dengan Gamifikasi Badge */}
+                {/* Linimasa Komunitas */}
                 <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
                   <div className="mb-6">
                     <h2 className="text-lg font-bold text-gray-900">Linimasa Komunitas</h2>
-                    <p className="text-sm text-gray-500 mt-1">Aktivitas terbaru dari circle MongoDB</p>
+                    <p className="text-sm text-gray-500 mt-1">Aktivitas terbaru dari circle Anda</p>
                   </div>
                   <div className="space-y-4 max-h-[600px] overflow-y-auto pr-2">
                     {allActivities.length === 0 ? (
                       <div className="text-center py-6 text-gray-400 text-sm">Belum ada aktivitas di database. Mulai latihan pertama Anda!</div>
                     ) : (
-                      allActivities.map((log) => {
+                      allActivities.slice().reverse().map((log) => {
                         const userXp = getUserTotalXP(log.userId);
                         const badge = getBadge(userXp);
                         return (
@@ -509,10 +591,10 @@ export default function Page() {
                 </div>
               </div>
 
-              {/* Form Input Latihan & Klasemen */}
+              {/* Form Input & Klasemen */}
               <div className="space-y-6">
                 
-                {/* Form Desktop (Disembunyikan di Layar Kecil karena ada Modal FAB) */}
+                {/* Form Desktop */}
                 <div className="hidden md:block bg-white rounded-xl border border-gray-200 shadow-sm p-6">
                   <div className="mb-6">
                     <h2 className="text-lg font-bold text-gray-900">Catat Progress Fisik</h2>
@@ -521,7 +603,7 @@ export default function Page() {
                   {renderActivityForm()}
                 </div>
 
-                {/* Klasemen Gamifikasi */}
+                {/* Klasemen Gamifikasi Global */}
                 <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
                   <div className="mb-6"><h2 className="text-lg font-bold text-gray-900">Klasemen Liga</h2><p className="text-sm text-gray-500 mt-1">Peringkat komunitas realtime</p></div>
                   
@@ -539,8 +621,13 @@ export default function Page() {
                             <div className="flex items-center gap-3">
                               <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${idx < 3 ? 'bg-orange-100 text-[#FF5722]' : 'bg-gray-200 text-gray-600'}`}>{idx + 1}</div>
                               <div>
-                                  <p className="font-bold text-sm text-gray-800 leading-tight">{player.name} {currentUser?.id === player.id && <span className="text-[#FF5722] font-normal text-xs ml-1">(Anda)</span>}</p>
-                                  <p className="text-[10px] text-gray-500 mt-0.5 flex items-center gap-1">{badge.icon} {badge.label}</p>
+                                  <p className="font-bold text-sm text-gray-800 leading-tight flex items-center">
+                                    {player.name} 
+                                    {player.statusBadge}
+                                  </p>
+                                  <p className="text-[10px] text-gray-500 mt-0.5 flex items-center gap-1">
+                                    {badge.icon} {badge.label} • {player.thisWeekContrib} Reps Misi
+                                  </p>
                               </div>
                             </div>
                             <span className="font-bold text-[#FF5722] text-sm bg-white px-2 py-1 rounded shadow-sm border border-gray-100">{player.xp} XP</span>
@@ -555,7 +642,7 @@ export default function Page() {
           </div>
         )}
 
-        {/* ================= HISTORI DENGAN PANELS & SUMMARY/DETAIL VIEWS ================= */}
+        {/* ================= HISTORI ================= */}
         {activeTab === 'history' && (
           <div className="max-w-4xl mx-auto space-y-6">
             
@@ -620,7 +707,7 @@ export default function Page() {
                     </div>
                   </div>
 
-                  {/* DIAGRAM BATANG KOMPARASI DUA DATA (Sama Persis seperti sebelumnya) */}
+                  {/* DIAGRAM BATANG KOMPARASI */}
                   <div className="mt-8 pt-2 overflow-x-auto">
                     <h3 className="text-base font-bold text-gray-900 mb-6 min-w-[500px]">Aktivitas per Jenis Latihan</h3>
                     
@@ -713,7 +800,7 @@ export default function Page() {
                       </tr>
                     </thead>
                     <tbody>
-                      {myActivities.map(log => (
+                      {myActivities.slice().reverse().map(log => (
                         <tr key={log.id} className="border-b border-gray-100 hover:bg-slate-50/30 transition">
                           <td className="py-4 text-gray-500 px-2">{log.date.split(',')[0]}</td>
                           <td className="py-4 font-semibold text-gray-900 px-2">{log.sessionName}</td>
