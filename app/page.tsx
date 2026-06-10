@@ -25,7 +25,7 @@ interface ActivityLog {
   sets: number;
   duration: number;
   distance: number;
-  timestamp: number; // Ditambahkan untuk sistem Weekly Quest
+  timestamp: number; // Digunakan untuk sistem Weekly Quest & Reset
 }
 
 export default function Page() {
@@ -89,7 +89,7 @@ export default function Page() {
     refreshDataFromDatabase();
   }, []);
 
-  // ================= GLOBAL WEEKLY QUEST LOGIC =================
+  // ================= GLOBAL WEEKLY QUEST & RESET LOGIC =================
   const QUEST_TARGET = 500;
   const QUEST_TYPE = 'Push Up';
 
@@ -104,20 +104,24 @@ export default function Page() {
   const startOfThisWeek = getStartOfWeek(new Date());
   const startOfLastWeek = startOfThisWeek - 7 * 24 * 60 * 60 * 1000;
 
-  // Filter data untuk Kalkulasi Global
-  const thisWeekActivities = allActivities.filter(a => a.timestamp && a.timestamp >= startOfThisWeek);
+  // Filter Data (Mingguan vs All-Time)
+  const weeklyActivities = allActivities.filter(a => a.timestamp && a.timestamp >= startOfThisWeek);
   const lastWeekActivities = allActivities.filter(a => a.timestamp && a.timestamp >= startOfLastWeek && a.timestamp < startOfThisWeek);
 
-  const thisWeekProgress = thisWeekActivities.filter(a => a.type === QUEST_TYPE).reduce((sum, a) => sum + (a.reps * a.sets), 0);
+  const myWeeklyActivities = currentUser ? weeklyActivities.filter(a => a.userId === currentUser.id) : [];
+  const myAllTimeActivities = currentUser ? allActivities.filter(a => a.userId === currentUser.id) : [];
+  const myTotalXp = myAllTimeActivities.reduce((acc, curr) => acc + curr.xp, 0);
+
+  const thisWeekProgress = weeklyActivities.filter(a => a.type === QUEST_TYPE).reduce((sum, a) => sum + (a.reps * a.sets), 0);
   const lastWeekProgress = lastWeekActivities.filter(a => a.type === QUEST_TYPE).reduce((sum, a) => sum + (a.reps * a.sets), 0);
 
   // Status Multiplier
   const isMultiplierActive = lastWeekProgress >= QUEST_TARGET;
   const xpMultiplier = isMultiplierActive ? 1.2 : 1.0;
 
-  // Helper untuk kontribusi per user
-  const getUserQuestContribution = (userId: string, weekActivities: ActivityLog[]) => {
-    return weekActivities.filter(a => a.userId === userId && a.type === QUEST_TYPE).reduce((sum, a) => sum + (a.reps * a.sets), 0);
+  // Helper untuk kontribusi per user di leaderboard
+  const getUserQuestContribution = (userId: string, weekActs: ActivityLog[]) => {
+    return weekActs.filter(a => a.userId === userId && a.type === QUEST_TYPE).reduce((sum, a) => sum + (a.reps * a.sets), 0);
   };
 
   // ================= AUTH LOGIC =================
@@ -198,7 +202,7 @@ export default function Page() {
   };
   const currentXP = calculateXP();
 
-  // ================= SIMPAN AKTIVITAS (SISTEM CICIL) =================
+  // ================= SIMPAN AKTIVITAS =================
   const handleSaveActivity = (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentUser) {
@@ -219,7 +223,7 @@ export default function Page() {
       sessionName: sessionName,
       type: exerciseType,
       date: new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'short' }) + ', ' + new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }),
-      timestamp: Date.now(), // Penting untuk Weekly Quest Reset
+      timestamp: Date.now(),
       detail: detailString,
       xp: currentXP,
       reps: parseInt(reps) || 0,
@@ -237,11 +241,9 @@ export default function Page() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Gagal menyimpan aktivitas latihan');
       
-      // TRIGGER REWARD ANIMATION
       setRewardAnim({ show: true, xp: currentXP, type: exerciseType });
       setTimeout(() => setRewardAnim({ show: false, xp: 0, type: '' }), 3500);
 
-      // Reset Form & Tutup Modal
       setSessionName(''); setReps(''); setSets(''); setDistance(''); setDuration('');
       setShowAddModal(false);
       refreshDataFromDatabase();
@@ -264,9 +266,10 @@ export default function Page() {
     .catch(err => alert(err.message));
   };
 
+  // MENGGUNAKAN DATA MINGGU INI UNTUK PROGRESS TARGET (RESET TIAP SENIN)
   const getProgress = (type: string) => {
     if (!currentUser) return 0;
-    const acts = allActivities.filter(a => a.userId === currentUser.id && a.type === type);
+    const acts = myWeeklyActivities.filter(a => a.type === type);
     if (['Push Up', 'Sit Up', 'Pull Up', 'Squat'].includes(type)) return acts.reduce((acc, curr) => acc + (curr.reps * curr.sets), 0);
     if (type === 'Plank') return acts.reduce((acc, curr) => acc + curr.duration, 0);
     if (type === 'Perfect Run') return acts.length; 
@@ -285,10 +288,10 @@ export default function Page() {
   const doneTargets = targets.filter(t => getProgress(t.key) >= t.max).length;
   const totalPercent = Math.min(Math.floor((doneTargets / targets.length) * 100), 100);
 
-  // Leaderboard Data (Diupdate dengan label Champion / Pasif)
+  // Leaderboard
   const leaderboard = allUsers.map(u => {
     const xp = getUserTotalXP(u.id);
-    const thisWeekContrib = getUserQuestContribution(u.id, thisWeekActivities);
+    const thisWeekContrib = getUserQuestContribution(u.id, weeklyActivities);
     const lastWeekContrib = getUserQuestContribution(u.id, lastWeekActivities);
     
     let statusBadge = null;
@@ -301,10 +304,7 @@ export default function Page() {
     return { id: u.id, name: u.fullName, xp, statusBadge, thisWeekContrib };
   }).sort((a, b) => b.xp - a.xp).filter(u => u.xp > 0);
 
-  const myActivities = currentUser ? allActivities.filter(a => a.userId === currentUser.id) : [];
-  const myTotalXp = myActivities.reduce((acc, curr) => acc + curr.xp, 0);
-
-  // ================= FUNGSI RENDER FORM (Untuk Desktop & Modal Mobile) =================
+  // ================= FUNGSI RENDER FORM =================
   const renderActivityForm = () => (
     <form onSubmit={handleSaveActivity} className="space-y-4">
       <div>
@@ -368,12 +368,8 @@ export default function Page() {
           </div>
 
           <div className="flex bg-gray-100 p-1 rounded-lg mb-6">
-            <button onClick={() => setAuthMode('login')} className={`flex-1 py-2 text-sm font-semibold rounded-md transition ${authMode === 'login' ? 'bg-white shadow-sm text-[#FF5722]' : 'text-gray-500 hover:text-gray-800'}`}>
-              Login
-            </button>
-            <button onClick={() => setAuthMode('register')} className={`flex-1 py-2 text-sm font-semibold rounded-md transition ${authMode === 'register' ? 'bg-white shadow-sm text-[#FF5722]' : 'text-gray-500 hover:text-gray-800'}`}>
-              Register
-            </button>
+            <button onClick={() => setAuthMode('login')} className={`flex-1 py-2 text-sm font-semibold rounded-md transition ${authMode === 'login' ? 'bg-white shadow-sm text-[#FF5722]' : 'text-gray-500 hover:text-gray-800'}`}>Login</button>
+            <button onClick={() => setAuthMode('register')} className={`flex-1 py-2 text-sm font-semibold rounded-md transition ${authMode === 'register' ? 'bg-white shadow-sm text-[#FF5722]' : 'text-gray-500 hover:text-gray-800'}`}>Register</button>
           </div>
 
           <form onSubmit={handleAuthSubmit} className="space-y-5">
@@ -504,8 +500,8 @@ export default function Page() {
             </div>
 
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-              <StatCard title="Total Sesi" value={currentUser ? myActivities.length.toString() : "0"} unit="sesi" icon={<span className="text-xl">🔥</span>} bg="bg-orange-50"/>
-              <StatCard title="Target" value={currentUser ? `${totalPercent}` : "0"} unit="%" icon={<span className="text-xl">🎯</span>} bg="bg-green-50"/>
+              <StatCard title="Sesi Minggu Ini" value={currentUser ? myWeeklyActivities.length.toString() : "0"} unit="sesi" icon={<span className="text-xl">🔥</span>} bg="bg-orange-50"/>
+              <StatCard title="Target Personal" value={currentUser ? `${totalPercent}` : "0"} unit="%" icon={<span className="text-xl">🎯</span>} bg="bg-green-50"/>
               <StatCard title="Pangkat" value={currentUser ? getBadge(myTotalXp).label : "-"} unit="" icon={<span className="text-xl">{currentUser ? getBadge(myTotalXp).icon : '🏅'}</span>} bg="bg-indigo-50"/>
               <StatCard title="Total FitPoin" value={currentUser ? myTotalXp.toString() : "0"} unit="XP" icon={<span className="text-xl">⚡</span>} bg="bg-yellow-50"/>
             </div>
@@ -516,8 +512,8 @@ export default function Page() {
                 {/* Target Mingguan Personal */}
                 <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
                   <div className="mb-6">
-                    <h2 className="text-lg font-bold text-gray-900">Target Personal</h2>
-                    <p className="text-sm text-gray-500 mt-1">Capaian pribadi Anda dari seluruh aktivitas</p>
+                    <h2 className="text-lg font-bold text-gray-900">Target Personal (Minggu Ini)</h2>
+                    <p className="text-sm text-gray-500 mt-1">Capaian pribadi Anda yang ter-reset setiap Senin</p>
                   </div>
                   <div className="space-y-6">
                     {targets.map(t => {
@@ -528,7 +524,7 @@ export default function Page() {
                   </div>
                   <div className="mt-8 pt-6 border-t border-gray-100">
                     <div className="flex justify-between text-sm font-semibold mb-2">
-                      <span>Total Progress</span>
+                      <span>Total Progress Mingguan</span>
                       <span className="text-gray-500">{doneTargets} / {targets.length} Done</span>
                     </div>
                     <div className="w-full bg-gray-100 rounded-full h-2 mb-1">
@@ -538,17 +534,17 @@ export default function Page() {
                   </div>
                 </div>
 
-                {/* Linimasa Komunitas */}
+                {/* Linimasa Komunitas Mingguan */}
                 <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
                   <div className="mb-6">
-                    <h2 className="text-lg font-bold text-gray-900">Linimasa Komunitas</h2>
-                    <p className="text-sm text-gray-500 mt-1">Aktivitas terbaru dari circle Anda</p>
+                    <h2 className="text-lg font-bold text-gray-900">Linimasa Komunitas (Minggu Ini)</h2>
+                    <p className="text-sm text-gray-500 mt-1">Aktivitas terbaru sejak Senin dari circle Anda</p>
                   </div>
                   <div className="space-y-4 max-h-[600px] overflow-y-auto pr-2">
-                    {allActivities.length === 0 ? (
-                      <div className="text-center py-6 text-gray-400 text-sm">Belum ada aktivitas di database. Mulai latihan pertama Anda!</div>
+                    {weeklyActivities.length === 0 ? (
+                      <div className="text-center py-6 text-gray-400 text-sm">Belum ada aktivitas minggu ini. Jadilah yang pertama!</div>
                     ) : (
-                      allActivities.slice().reverse().map((log) => {
+                      weeklyActivities.slice().reverse().map((log) => {
                         const userXp = getUserTotalXP(log.userId);
                         const badge = getBadge(userXp);
                         return (
@@ -642,7 +638,7 @@ export default function Page() {
           </div>
         )}
 
-        {/* ================= HISTORI ================= */}
+        {/* ================= HISTORI (ALL-TIME DATA) ================= */}
         {activeTab === 'history' && (
           <div className="max-w-4xl mx-auto space-y-6">
             
@@ -652,8 +648,8 @@ export default function Page() {
                   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#FF5722" strokeWidth="2"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
                 </div>
                 <div>
-                  <p className="text-sm text-gray-500 font-medium">Total Akumulasi Latihan Anda</p>
-                  <p className="text-2xl font-bold text-gray-900 mt-0.5">{myActivities.length} <span className="text-sm font-normal text-gray-500">Sesi</span></p>
+                  <p className="text-sm text-gray-500 font-medium">Total Akumulasi Latihan (All-Time)</p>
+                  <p className="text-2xl font-bold text-gray-900 mt-0.5">{myAllTimeActivities.length} <span className="text-sm font-normal text-gray-500">Sesi</span></p>
                 </div>
               </div>
               <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm flex items-center gap-4">
@@ -670,8 +666,8 @@ export default function Page() {
             <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6 pb-4 border-b border-gray-100">
                 <div>
-                  <h2 className="text-xl font-bold text-gray-900">Histori Progress Personal</h2>
-                  <p className="text-sm text-gray-500 mt-0.5">Pantau ringkasan akumulasi volume dan detail aktivitas Anda</p>
+                  <h2 className="text-xl font-bold text-gray-900">Histori Keseluruhan Latihan</h2>
+                  <p className="text-sm text-gray-500 mt-0.5">Seluruh riwayat aktivitas Anda dari awal tanpa reset</p>
                 </div>
                 
                 <div className="flex bg-gray-100 p-1 rounded-lg self-start">
@@ -689,7 +685,7 @@ export default function Page() {
                   <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
                     <div className="border border-gray-200 rounded-xl p-5 bg-white shadow-sm">
                       <p className="text-xs font-medium text-gray-400 mb-3">Total Aktivitas</p>
-                      <p className="text-2xl font-bold text-[#FF5722]">{myActivities.length}</p>
+                      <p className="text-2xl font-bold text-[#FF5722]">{myAllTimeActivities.length}</p>
                     </div>
                     <div className="border border-gray-200 rounded-xl p-5 bg-white shadow-sm">
                       <p className="text-xs font-medium text-gray-400 mb-3">Total Points</p>
@@ -697,23 +693,23 @@ export default function Page() {
                     </div>
                     <div className="border border-gray-200 rounded-xl p-5 bg-white shadow-sm">
                       <p className="text-xs font-medium text-gray-400 mb-3">Jenis Latihan</p>
-                      <p className="text-2xl font-bold text-[#FF5722]">{new Set(myActivities.map(a => a.type)).size}</p>
+                      <p className="text-2xl font-bold text-[#FF5722]">{new Set(myAllTimeActivities.map(a => a.type)).size}</p>
                     </div>
                     <div className="border border-gray-200 rounded-xl p-5 bg-white shadow-sm">
                       <p className="text-xs font-medium text-gray-400 mb-3">Rata-rata XP</p>
                       <p className="text-2xl font-bold text-[#FF5722]">
-                        {myActivities.length > 0 ? Math.round(myTotalXp / myActivities.length) : 0}
+                        {myAllTimeActivities.length > 0 ? Math.round(myTotalXp / myAllTimeActivities.length) : 0}
                       </p>
                     </div>
                   </div>
 
-                  {/* DIAGRAM BATANG KOMPARASI */}
+                  {/* DIAGRAM BATANG KOMPARASI HISTORI */}
                   <div className="mt-8 pt-2 overflow-x-auto">
-                    <h3 className="text-base font-bold text-gray-900 mb-6 min-w-[500px]">Aktivitas per Jenis Latihan</h3>
+                    <h3 className="text-base font-bold text-gray-900 mb-6 min-w-[500px]">Aktivitas per Jenis Latihan (All-Time)</h3>
                     
                     {(() => {
-                      const rawChartData = Array.from(new Set(myActivities.map(a => a.type))).map(type => {
-                        const filtered = myActivities.filter(a => a.type === type);
+                      const rawChartData = Array.from(new Set(myAllTimeActivities.map(a => a.type))).map(type => {
+                        const filtered = myAllTimeActivities.filter(a => a.type === type);
                         return {
                           name: type === 'Push Up' ? 'Push' : type,
                           jumlah: filtered.length,
@@ -800,7 +796,7 @@ export default function Page() {
                       </tr>
                     </thead>
                     <tbody>
-                      {myActivities.slice().reverse().map(log => (
+                      {myAllTimeActivities.slice().reverse().map(log => (
                         <tr key={log.id} className="border-b border-gray-100 hover:bg-slate-50/30 transition">
                           <td className="py-4 text-gray-500 px-2">{log.date.split(',')[0]}</td>
                           <td className="py-4 font-semibold text-gray-900 px-2">{log.sessionName}</td>
